@@ -52,17 +52,33 @@ public final class MemoryUtil {
 	}
 
 	private static final Class<? extends ByteBuffer> BYTE_BUFFER;
+	private static final Class<? extends CharBuffer> CHAR_BUFFER;
+	private static final Class<? extends ShortBuffer> SHORT_BUFFER;
+	private static final Class<? extends IntBuffer> INT_BUFFER;
+	private static final Class<? extends LongBuffer> LONG_BUFFER;
+	private static final Class<? extends FloatBuffer> FLOAT_BUFFER;
+	private static final Class<? extends DoubleBuffer> DOUBLE_BUFFER;
 
 	private static final sun.misc.Unsafe UNSAFE;
 
 	private static final long ADDRESS;
 	private static final long CAPACITY;
 
+	private static final long BB;
+	private static final long ORDER;
+
 	private static final long   MEMORY_REF;
 	private static final Object MEMORY_REF_INSTANCE; // MemoryRef
 
 	static {
-		BYTE_BUFFER = ByteBuffer.allocateDirect(0).order(ByteOrder.nativeOrder()).getClass();
+		ByteBuffer buffer = ByteBuffer.allocateDirect(0).order(ByteOrder.nativeOrder());
+		BYTE_BUFFER = buffer.getClass();
+		CHAR_BUFFER = buffer.asCharBuffer().getClass();
+		SHORT_BUFFER = buffer.asShortBuffer().getClass();
+		INT_BUFFER = buffer.asIntBuffer().getClass();
+		LONG_BUFFER = buffer.asLongBuffer().getClass();
+		FLOAT_BUFFER = buffer.asFloatBuffer().getClass();
+		DOUBLE_BUFFER = buffer.asDoubleBuffer().getClass();
 
 		try {
 			UNSAFE = getUnsafeInstance();
@@ -70,11 +86,14 @@ public final class MemoryUtil {
 			ADDRESS = getAddressOffset(UNSAFE);
 			CAPACITY = getCapacityOffset(UNSAFE);
 
+			BB = UNSAFE.objectFieldOffset(INT_BUFFER.getDeclaredField("bb"));
+			ORDER = UNSAFE.objectFieldOffset(INT_BUFFER.getDeclaredField("order"));
+
 			ByteBuffer bb = NewDirectByteBuffer(0xDEADBEEFL, 0);
 
 			java.lang.reflect.Field memoryRefField = bb.getClass().getDeclaredField("memoryRef");
 			MEMORY_REF = UNSAFE.objectFieldOffset(memoryRefField);
-			MEMORY_REF_INSTANCE = UNSAFE.getObject(bb, MEMORY_REF);
+			MEMORY_REF_INSTANCE = UNSAFE.getObject(bb, MEMORY_REF); // only used for isAccessible checks
 		} catch (Exception e) {
 			throw new UnsupportedOperationException(e);
 		}
@@ -697,9 +716,27 @@ public final class MemoryUtil {
 
 		UNSAFE.putLong(buffer, ADDRESS, address);
 		UNSAFE.putInt(buffer, CAPACITY, capacity);
-		UNSAFE.putObject(buffer, MEMORY_REF, MEMORY_REF_INSTANCE);
-
 		buffer.clear();
+
+		return buffer;
+	}
+
+	private static ByteBuffer setup(long address, int capacity) {
+		ByteBuffer buffer = setup(BYTE_BUFFER, address, capacity);
+
+		UNSAFE.putObject(buffer, MEMORY_REF, MEMORY_REF_INSTANCE);
+		buffer.order(ByteOrder.nativeOrder());
+
+		return buffer;
+	}
+
+	@SuppressWarnings("unchecked")
+	private static <T extends Buffer> T setup(Class<T> clazz, long address, int capacity, int byteShift) {
+		T buffer = setup(clazz, address, capacity);
+
+		UNSAFE.putObject(buffer, BB, setup(address, capacity << byteShift));
+		UNSAFE.putObject(buffer, ORDER, ByteOrder.nativeOrder());
+
 		return buffer;
 	}
 
@@ -716,7 +753,7 @@ public final class MemoryUtil {
 		if ( address == NULL )
 			return null;
 
-		return setup(BYTE_BUFFER, address, capacity).order(ByteOrder.nativeOrder());
+		return setup(address, capacity);
 	}
 
 	/**
@@ -736,7 +773,7 @@ public final class MemoryUtil {
 		if ( Checks.DEBUG && (address & (2 - 1)) != 0L )
 			throw new IllegalArgumentException("Unaligned memory address");
 
-		return memByteBuffer(address, capacity << 1).asShortBuffer();
+		return setup(SHORT_BUFFER, address, capacity, 1);
 	}
 
 	/**
@@ -756,7 +793,7 @@ public final class MemoryUtil {
 		if ( Checks.DEBUG && (address & (2 - 1)) != 0L )
 			throw new IllegalArgumentException("Unaligned memory address");
 
-		return memByteBuffer(address, capacity << 1).asCharBuffer();
+		return setup(CHAR_BUFFER, address, capacity, 1);
 	}
 
 	/**
@@ -776,7 +813,7 @@ public final class MemoryUtil {
 		if ( Checks.DEBUG && (address & (4 - 1)) != 0L )
 			throw new IllegalArgumentException("Unaligned memory address");
 
-		return memByteBuffer(address, capacity << 2).asIntBuffer();
+		return setup(INT_BUFFER, address, capacity, 2);
 	}
 
 	/**
@@ -796,7 +833,7 @@ public final class MemoryUtil {
 		if ( Checks.DEBUG && (address & (8 - 1)) != 0L )
 			throw new IllegalArgumentException("Unaligned memory address");
 
-		return memByteBuffer(address, capacity << 3).asLongBuffer();
+		return setup(LONG_BUFFER, address, capacity, 3);
 	}
 
 	/**
@@ -816,7 +853,7 @@ public final class MemoryUtil {
 		if ( Checks.DEBUG && (address & (4 - 1)) != 0L )
 			throw new IllegalArgumentException("Unaligned memory address");
 
-		return memByteBuffer(address, capacity << 2).asFloatBuffer();
+		return setup(FLOAT_BUFFER, address, capacity, 2);
 	}
 
 	/**
@@ -836,7 +873,7 @@ public final class MemoryUtil {
 		if ( Checks.DEBUG && (address & (8 - 1)) != 0L )
 			throw new IllegalArgumentException("Unaligned memory address");
 
-		return memByteBuffer(address, capacity << 3).asDoubleBuffer();
+		return setup(DOUBLE_BUFFER, address, capacity, 3);
 	}
 
 	/**
